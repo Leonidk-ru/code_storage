@@ -11,17 +11,21 @@ build_review:
   stage: build
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" "$CI_REGISTRY" --password-stdin
-    - docker build --build-arg STAGE=development -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" -f build/Dockerfile .
-    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG > /dev/null 2>&1 || echo "Image not found"
+    - docker build --build-arg STAGE=development -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG" -f build/Dockerfile .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
     - docker image prune -af
   rules:
-    - changes:
-      - ./src/
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: never
     - if: $CI_COMMIT_BRANCH == "master"
       when: never
     - if: $CI_COMMIT_BRANCH =~ /^NR/
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_BRANCH =~ /^NR/
+      changes:
+        - ./src/
   tags:
     - job:build.test
   environment:
@@ -71,9 +75,9 @@ deploy_review:
 #    - nc -vz 127.0.0.1 $HOSTPORT
 #    - ip addr
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
 #    - docker cp ./nginx.template review-nginx:/etc/nginx/conf.d/$CI_COMMIT_REF_SLUG.conf
-    - docker exec review-nginx /bin/bash -c "CI_COMMIT_REF_SLUG=$CI_COMMIT_REF_SLUG && $HOSTPORT=HOSTPORT"
+    - docker exec review-nginx /bin/bash -c "CI_COMMIT_REF_SLUG=$CI_COMMIT_REF_SLUG && HOSTPORT=$HOSTPORT"
     - docker exec review-nginx /bin/bash -c "nginx -s reload"    
     - docker stop nmo-frontend_$CI_COMMIT_REF_NAME || true
     - docker rm nmo-frontend_$CI_COMMIT_REF_NAME || true
