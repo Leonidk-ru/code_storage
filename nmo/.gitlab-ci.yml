@@ -1,0 +1,154 @@
+image: docker:20.10.6-dind
+
+stages:
+  - build
+  - review
+  - deploy
+
+######## BUILD ########
+
+build_review:
+  stage: build
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" "$CI_REGISTRY" --password-stdin
+    - docker build --build-arg STAGE=development -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" -f build/Dockerfile .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker image prune -af
+  rules:
+    - changes:
+      - ./src/
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH == "master"
+      when: never
+    - if: $CI_COMMIT_BRANCH =~ /^NR/
+  tags:
+    - job:build.test
+  environment:
+    name: test
+
+build_test:
+  stage: build
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" "$CI_REGISTRY" --password-stdin
+    - docker build --build-arg STAGE=development -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" -f build/Dockerfile .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker image prune -af
+  only:
+    - develop
+    - multiservice_container
+  tags:
+    - job:build.test
+  environment:
+    name: test
+
+build_prod:
+  stage: build
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build --build-arg STAGE=production -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" -f build/Dockerfile .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker image prune -af
+  only:
+    - master
+  tags:
+    - job:build.prod
+  environment:
+    name: prod
+
+
+######## REVIEW APP ########
+
+deploy_review:
+  stage: review
+  variables:
+    HOSTPORT: 800
+  before_script:
+    - export
+  script:
+    - echo "Deploy a review app"
+#    - until nc -vvz localhost $HOSTPORT 2>&1 | grep ref| cut -d ' ' -f6 2>&1; do port=`expr $HOSTPORT + 1`; done
+#    - nc -vz 127.0.0.1 $HOSTPORT
+#    - ip addr
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+#    - docker cp ./nginx.template review-nginx:/etc/nginx/conf.d/$CI_COMMIT_REF_SLUG.conf
+    - docker exec review-nginx /bin/bash -c "CI_COMMIT_REF_SLUG=$CI_COMMIT_REF_SLUG && $HOSTPORT=HOSTPORT"
+    - docker exec review-nginx /bin/bash -c "nginx -s reload"    
+    - docker stop nmo-frontend_$CI_COMMIT_REF_NAME || true
+    - docker rm nmo-frontend_$CI_COMMIT_REF_NAME || true
+    - docker run --restart=always --name nmo-frontend_$CI_COMMIT_REF_NAME -d -p $HOSTPORT:80 $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA 
+#    - nc -vz 127.0.0.1 $HOSTPORT
+    - docker image prune -af    
+    - HostPort=`docker inspect nmo-frontend_$CI_COMMIT_REF_NAME | grep HostPort | sort | uniq | grep -o [0-9]*`
+    - echo $HostPort
+  environment:
+    name: review/$CI_COMMIT_REF_SLUG
+    url: https://$CI_COMMIT_REF_SLUG.dev-nmo.ru
+    on_stop: stop_review
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH == "master"
+      when: never
+    - if: $CI_COMMIT_BRANCH =~ /^NR/
+      
+  tags:
+    - job:deploy.test 
+
+stop_review:
+  stage: review
+  before_script:
+    - export
+  script:
+    - docker stop nmo-frontend_$CI_COMMIT_REF_NAME || true
+    - docker rm nmo-frontend_$CI_COMMIT_REF_NAME || true
+    - docker image prune -af    
+  environment:
+    name: review/$CI_COMMIT_REF_SLUG
+    action: stop
+    
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH == "master"
+      when: never
+    - if: $CI_COMMIT_BRANCH =~ /^NR/
+      when: manual
+  tags:
+    - job:deploy.test    
+    
+######## DEPLOY ########
+
+deploy_test:
+  stage: deploy
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker stop nmo-frontend || true
+    - docker rm nmo-frontend || true
+    - docker run --restart=always --name nmo-frontend -d -p 8080:80 $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker image prune -af
+  only:
+    - develop
+    - multiservice_container
+  tags:
+    - job:deploy.test
+  environment:
+    name: test
+
+deploy_prod:
+  stage: deploy
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker stop nmo-frontend || true
+    - docker rm nmo-frontend || true
+    - docker run --restart=always --name nmo-frontend -d -p 8080:80 $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker image prune -af
+  only:
+    - master
+  tags:
+    - job:deploy.prod
+  environment:
+    name: prod
