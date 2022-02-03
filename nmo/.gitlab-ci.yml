@@ -21,11 +21,12 @@ build_review:
     - if: $CI_COMMIT_BRANCH == "master"
       when: never
     - if: $CI_COMMIT_BRANCH =~ /^NR/
-      when: manual
-      allow_failure: true
-    - if: $CI_COMMIT_BRANCH =~ /^NR/
       changes:
         - ./src/
+    - if: $CI_COMMIT_BRANCH =~ /^NR/
+      when: manual
+      allow_failure: true
+
   tags:
     - job:build.test
   environment:
@@ -66,26 +67,30 @@ build_prod:
 deploy_review:
   stage: review
   variables:
-    HOSTPORT: 800
+    VHOST_PATH: /etc/nginx/conf.d/$CI_COMMIT_REF_SLUG.conf
   before_script:
     - export
   script:
     - echo "Deploy a review app"
-#    - until nc -vvz localhost $HOSTPORT 2>&1 | grep ref| cut -d ' ' -f6 2>&1; do port=`expr $HOSTPORT + 1`; done
-#    - nc -vz 127.0.0.1 $HOSTPORT
-#    - ip addr
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
-#    - docker cp ./nginx.template review-nginx:/etc/nginx/conf.d/$CI_COMMIT_REF_SLUG.conf
-    - docker exec review-nginx /bin/bash -c "CI_COMMIT_REF_SLUG=$CI_COMMIT_REF_SLUG && HOSTPORT=$HOSTPORT"
-    - docker exec review-nginx /bin/bash -c "nginx -s reload"    
     - docker stop nmo-frontend_$CI_COMMIT_REF_SLUG || true
     - docker rm nmo-frontend_$CI_COMMIT_REF_SLUG || true
-    - docker run --restart=always --name nmo-frontend_$CI_COMMIT_REF_SLUG -d -p $HOSTPORT:80 $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG 
-#    - nc -vz 127.0.0.1 $HOSTPORT
+    - docker run --restart=always --name nmo-frontend_$CI_COMMIT_REF_SLUG -d $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG 
 #    - docker image prune -af    
-    - HostPort=`docker inspect nmo-frontend_$CI_COMMIT_REF_NAME | grep HostPort | sort | uniq | grep -o [0-9]*`
-    - echo $HostPort
+#    - HostPort=`docker inspect nmo-frontend_$CI_COMMIT_REF_SLUG | grep HostPort | sort | uniq | grep -o [0-9]*`
+    - IPAddr=`docker inspect nmo-frontend_$CI_COMMIT_REF_SLUG | grep IPAddress | grep -o [0-9.0-9]* | uniq`
+    - cp ./nginx.template ./nginx.template.tmp
+    - sed -i -E "s/REPLACE_HOST/$CI_COMMIT_REF_SLUG/g" nginx.template.tmp
+    - sed -i -E "s/REPLACE_ADDR/$IPAddr/g" nginx.template.tmp
+    - cat ./nginx.template.tmp
+    - docker cp ./nginx.template.tmp review-nginx:$VHOST_PATH
+    - rm -rf ./nginx.template.tmp
+#    - cat ./nginx.template | while read LINE; do docker exec review-nginx bash -c 'echo $LINE >> /etc/nginx/conf.d/$CI_COMMIT_REF_SLUG.conf' && echo $LINE;done
+#    - cat ./nginx.template | docker exec -i review-nginx bash -c 'cat > /etc/nginx/conf.d/$CI_COMMIT_REF_SLUG.conf'
+#    - echo $IPAddr
+#    - docker exec review-nginx nginx -s reload
+    
   environment:
     name: review/$CI_COMMIT_REF_SLUG
     url: https://$CI_COMMIT_REF_SLUG.dev-nmo.ru
@@ -96,6 +101,8 @@ deploy_review:
     - if: $CI_COMMIT_BRANCH == "master"
       when: never
     - if: $CI_COMMIT_BRANCH =~ /^NR/
+#      when: delayed
+#      start_in: 30 seconds
       
   tags:
     - job:deploy.test 
