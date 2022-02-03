@@ -71,25 +71,19 @@ deploy_review:
   before_script:
     - export
   script:
-    - echo "Deploy a review app"
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
     - docker stop nmo-frontend_$CI_COMMIT_REF_SLUG || true
     - docker rm nmo-frontend_$CI_COMMIT_REF_SLUG || true
     - docker run --restart=always --name nmo-frontend_$CI_COMMIT_REF_SLUG -d $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG 
 #    - docker image prune -af    
-#    - HostPort=`docker inspect nmo-frontend_$CI_COMMIT_REF_SLUG | grep HostPort | sort | uniq | grep -o [0-9]*`
     - IPAddr=`docker inspect nmo-frontend_$CI_COMMIT_REF_SLUG | grep IPAddress | grep -o [0-9.0-9]* | uniq`
     - cp ./nginx.template ./nginx.template.tmp
     - sed -i -E "s/REPLACE_HOST/$CI_COMMIT_REF_SLUG/g" nginx.template.tmp
     - sed -i -E "s/REPLACE_ADDR/$IPAddr/g" nginx.template.tmp
-    - cat ./nginx.template.tmp
     - docker cp ./nginx.template.tmp review-nginx:$VHOST_PATH
     - rm -rf ./nginx.template.tmp
-#    - cat ./nginx.template | while read LINE; do docker exec review-nginx bash -c 'echo $LINE >> /etc/nginx/conf.d/$CI_COMMIT_REF_SLUG.conf' && echo $LINE;done
-#    - cat ./nginx.template | docker exec -i review-nginx bash -c 'cat > /etc/nginx/conf.d/$CI_COMMIT_REF_SLUG.conf'
-#    - echo $IPAddr
-#    - docker exec review-nginx nginx -s reload
+    - docker exec review-nginx nginx -s reload
     
   environment:
     name: review/$CI_COMMIT_REF_SLUG
@@ -101,8 +95,8 @@ deploy_review:
     - if: $CI_COMMIT_BRANCH == "master"
       when: never
     - if: $CI_COMMIT_BRANCH =~ /^NR/
-#      when: delayed
-#      start_in: 30 seconds
+      when: delayed
+      start_in: 30 seconds
       
   tags:
     - job:deploy.test 
@@ -112,8 +106,8 @@ stop_review:
   before_script:
     - export
   script:
-    - docker stop nmo-frontend_$CI_COMMIT_REF_NAME || true
-    - docker rm nmo-frontend_$CI_COMMIT_REF_NAME || true
+    - docker stop nmo-frontend_$CI_COMMIT_REF_SLUG || true
+    - docker rm nmo-frontend_$CI_COMMIT_REF_SLUG || true
     - docker exec review-nginx rm -rf /etc/nginx/conf.d/$CI_COMMIT_REF_SLUG.conf
     - docker exec review-nginx nginx -s reload
 #    - docker image prune -af    
